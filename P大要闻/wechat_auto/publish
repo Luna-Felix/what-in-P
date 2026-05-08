@@ -1,0 +1,431 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+每日自动抓取指定公众号文章，按自定义分类生成汇总推文并发布到公众号草稿箱
+"""
+
+import feedparser
+import requests
+import time
+import re
+from datetime import datetime, timedelta
+from markdown import markdown
+
+# ==================== 配置区域（请修改成你自己的） ====================
+
+# 1. 公众号的 AppID 和 AppSecret
+APP_ID = "wx012f3b7e71a95a33"
+APP_SECRET = "c6e4db007506c5781307f33d8795d499"   # ← 已填写，请确保正确
+
+# 2. 定义 RSS 链接及其对应的分类（按照你的公众号列表.md 来组织）
+# 格式： ("RSS链接", "分类名称")
+RSS_FEEDS_WITH_CATEGORY = [
+    # === 全校公众号 ===
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3079142433", "全校公众号"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3089223813", "全校公众号"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3216330155", "全校公众号"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3568658151", "全校公众号"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3070011211", "全校公众号"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3599941172", "全校公众号"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3092256228", "全校公众号"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3085079830", "全校公众号"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3881237589", "全校公众号"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3863759840", "全校公众号"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3077142721", "全校公众号"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3578898470", "全校公众号"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3902399957", "全校公众号"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3272020996", "全校公众号"),
+
+    # === 理学部 ===
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3533883811", "理学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3094010631", "理学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3097508813", "理学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3204130298", "理学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3000103241", "理学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3003719675", "理学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3597855365", "理学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3088497827", "理学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3070069586", "理学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3516692029", "理学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3945154668", "理学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_2396488750", "理学部"),
+
+    # === 信息科学与技术学部 ===
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3081033494", "信息科学与技术学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3561106982", "信息科学与技术学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3896553369", "信息科学与技术学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3237606196", "信息科学与技术学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3918311381", "信息科学与技术学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3944178897", "信息科学与技术学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3919233941", "信息科学与技术学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3083643002", "信息科学与技术学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3880856645", "信息科学与技术学部"),
+
+    # === 工学部 ===
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3090253802", "工学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3070100373", "工学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3624022033", "工学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3624221537", "工学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3624494031", "工学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3623338100", "工学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3867634837", "工学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3866723435", "工学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3947252545", "工学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3298935053", "工学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3895611060", "工学部"),
+
+    # === 人文学部 ===
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3248706907", "人文学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3095129138", "人文学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3248182393", "人文学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3074603912", "人文学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3928303103", "人文学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3227237497", "人文学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3098076403", "人文学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3921236797", "人文学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3084341922", "人文学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3242377290", "人文学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3296006847", "人文学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3099544295", "人文学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3019976114", "人文学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3867751919", "人文学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3078561984", "人文学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3009713815", "人文学部"),
+
+    # === 社会科学学部 ===
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3888634619", "社会科学学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3080013707", "社会科学学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3074425314", "社会科学学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3621101729", "社会科学学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3079845427", "社会科学学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3073354601", "社会科学学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3592736545", "社会科学学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3895888112", "社会科学学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3213492051", "社会科学学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3238937349", "社会科学学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3214252519", "社会科学学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3239619570", "社会科学学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3089092080", "社会科学学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3873193434", "社会科学学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3885746010", "社会科学学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3092090716", "社会科学学部"),
+
+    # === 经济与管理学部 ===
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3233364097", "经济与管理学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_2393488235", "经济与管理学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_2390974801", "经济与管理学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3011154910", "经济与管理学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3089102999", "经济与管理学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_2390204840", "经济与管理学部"),
+
+    # === 医学部 ===
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3250532807", "医学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3075054839", "医学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3019022940", "医学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3013868727", "医学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3923231132", "医学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3215197370", "医学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_2399452959", "医学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3922426882", "医学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3879527596", "医学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3934297965", "医学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3015098593", "医学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3557860454", "医学部"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3915436970", "医学部"),
+
+    # === 深圳研究生院 ===
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3292380723", "深圳研究生院"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3076142612", "深圳研究生院"),
+
+    # === 社团 ===
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3299977160", "社团"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3098088112", "社团"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3013114023", "社团"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3097639100", "社团"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3080426119", "社团"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3072335459", "社团"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3070010437", "社团"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3070120213", "社团"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3099895612", "社团"),
+
+    # === 就业 ===
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3092648817", "就业"),
+    ("https://what-in-p.zeabur.app/feeds/MP_WXS_3074790035", "就业"),
+]
+
+# 3. 封面图片路径（请使用绝对路径）
+COVER_IMAGE_PATH = r"E:\周梓晗\P大要闻\cover.png"
+
+# 4. 每天定时运行的时间（用于抓取时间范围，晚上20:00运行）
+RUN_HOUR = 20   # 晚上8点
+# 抓取范围：前一天 RUN_HOUR 点 到 当天 RUN_HOUR 点
+
+# 自定义分类显示顺序（按你的偏好排列）
+CATEGORY_ORDER = [
+    "全校公众号",
+    "信息科学与技术学部",
+    "理学部",
+    "工学部",
+    "人文学部",
+    "社会科学学部",
+    "经济与管理学部",
+    "医学部",
+    "深圳研究生院",
+    "社团",
+    "就业"
+]
+
+# ==================== 以下代码无需修改 ====================
+
+def get_access_token(app_id, app_secret):
+    """获取微信公众平台的 access_token"""
+    url = f"https://api.weixin.qq.com/cgi-bin/token?grant_type=client_credential&appid={app_id}&secret={app_secret}"
+    resp = requests.get(url).json()
+    if "access_token" in resp:
+        print(f"✅ 获取 access_token 成功")
+        return resp["access_token"]
+    else:
+        print(f"❌ 获取 access_token 失败：{resp}")
+        return None
+
+def upload_cover(access_token, image_path):
+    """上传封面图片，返回 thumb_media_id"""
+    url = f"https://api.weixin.qq.com/cgi-bin/material/add_material?access_token={access_token}&type=thumb"
+    with open(image_path, "rb") as f:
+        files = {"media": f}
+        resp = requests.post(url, files=files).json()
+    # 兼容两种返回字段名
+    if "thumb_media_id" in resp:
+        print(f"✅ 封面上传成功")
+        return resp["thumb_media_id"]
+    elif "media_id" in resp:
+        print(f"✅ 封面上传成功")
+        return resp["media_id"]
+    else:
+        print(f"❌ 封面上传失败：{resp}")
+        return None
+
+def fetch_articles_from_feeds(feed_list, start_time, end_time):
+    """从多个 RSS 源抓取指定时间范围内的文章，一旦遇到超出范围的旧文章就停止抓取该源"""
+    all_articles = []
+    for feed_url, category in feed_list:
+        print(f"正在抓取 {feed_url} (分类: {category}) ...")
+        try:
+            feed = feedparser.parse(feed_url)
+            # 标记该公众号是否发生了“已遍历到旧文章”的断点情况
+            break_encountered = False
+            for entry in feed.entries:
+                # 获取文章发布时间（优先使用 updated_parsed，其次 published_parsed）
+                pub_time = None
+                if hasattr(entry, "updated_parsed") and entry.updated_parsed:
+                    pub_time = datetime(*entry.updated_parsed[:6])
+                elif hasattr(entry, "published_parsed") and entry.published_parsed:
+                    pub_time = datetime(*entry.published_parsed[:6])
+                else:
+                    print(f"⚠️ 无法解析时间: {entry.title}")
+                    continue
+                
+                # 将 RSS 中的 UTC 时间转换为北京时间（UTC+8）
+                pub_time_beijing = pub_time + timedelta(hours=8)
+                print(f"DEBUG: {entry.title} -> UTC: {pub_time} 北京时间: {pub_time_beijing}")
+                
+                # 时间范围判断逻辑优化
+                # 如果当前文章的时间已经早于起始时间（start_time），说明后面的文章只会更早，可以停止抓取这个源了
+                if pub_time_beijing < start_time:
+                    print(f"  文章发布时间已超出范围，停止抓取此源。")
+                    break_encountered = True
+                    break
+                
+                # 如果文章在时间范围内，则收集
+                if start_time <= pub_time_beijing <= end_time:
+                    source = feed.feed.title if hasattr(feed.feed, "title") else "未知来源"
+                    all_articles.append({
+                        "title": entry.title,
+                        "link": entry.link,
+                        "source": source,
+                        "category": category,
+                        "published": pub_time_beijing
+                    })
+            if break_encountered:
+                continue
+        except Exception as e:
+            print(f"⚠️ 抓取 {feed_url} 时出错：{e}")
+    print(f"共抓取到 {len(all_articles)} 篇符合条件的文章")
+    return all_articles
+
+def generate_markdown_content(articles, date_str):
+    """生成 HTML 格式，根据 CATEGORY_ORDER 自动分组：独立大分类 vs 学部与院系子分类"""
+    categorized = {}
+    for art in articles:
+        cat = art["category"]
+        categorized.setdefault(cat, []).append(art)
+    
+    # 定义哪些分类是独立的大分类（单独显示，不放入“学部与院系”）
+    independent_cats = ["全校公众号", "社团", "就业"]
+    
+    # 分出独立分类和需归入学部与院系的分类
+    independent = [cat for cat in CATEGORY_ORDER if cat in categorized and cat in independent_cats]
+    faculty_cats = [cat for cat in CATEGORY_ORDER if cat in categorized and cat not in independent_cats]
+    
+    html_parts = []
+    
+    # 1. 独立大分类
+    for idx, cat in enumerate(independent, start=1):
+        html_parts.append(f"<h2 style='font-size:18px; font-weight:bold;'>{idx}. {cat}</h2>")
+        html_parts.append("<ul style='margin-left:20px;'>")
+        for art in categorized[cat]:
+            time_str = art["published"].strftime("%H:%M")
+            html_parts.append(
+                f"<li style='margin-bottom:8px;'>"
+                f"<a href='{art['link']}' style='color:#4866a5; text-decoration:none;'><strong>{art['title']}</strong></a><br/>"
+                f"<span style='font-size:14px; color:#555;'>来源：{art['source']} ｜ {time_str}</span>"
+                f"</li>"
+            )
+        html_parts.append("</ul>")
+    
+    # 2. 学部与院系大分类（包含所有 faculty_cats）
+    if faculty_cats:
+        # 大分类编号继续从独立分类后开始
+        main_idx = len(independent) + 1
+        html_parts.append(f"<h2 style='font-size:18px; font-weight:bold;'>{main_idx}. 学部与院系</h2>")
+        for sub_idx, sub_cat in enumerate(faculty_cats, start=1):
+            if sub_cat not in categorized:
+                continue
+            sub_letter = chr(96 + sub_idx)  # a, b, c, ...
+            html_parts.append(f"<h3 style='font-size:17px; font-weight:bold;'>{sub_letter}. {sub_cat}</h3>")
+            html_parts.append("<ul style='margin-left:20px;'>")
+            for art in categorized[sub_cat]:
+                time_str = art["published"].strftime("%H:%M")
+                html_parts.append(
+                    f"<li style='margin-bottom:8px;'>"
+                    f"<a href='{art['link']}' style='color:#4866a5; text-decoration:none;'><strong>{art['title']}</strong></a><br/>"
+                    f"<span style='font-size:14px; color:#555;'>来源：{art['source']} ｜ {time_str}</span>"
+                    f"</li>"
+                )
+            html_parts.append("</ul>")
+    
+    # 处理未在 CATEGORY_ORDER 中分类的文章（如果有）
+    all_defined = set(CATEGORY_ORDER)
+    other = [cat for cat in categorized if cat not in all_defined]
+    if other:
+        html_parts.append("<h2 style='font-size:18px; font-weight:bold;'>其他</h2>")
+        for cat in other:
+            html_parts.append(f"<h3 style='font-size:17px; font-weight:bold;'>{cat}</h3>")
+            html_parts.append("<ul>")
+            for art in categorized[cat]:
+                time_str = art["published"].strftime("%H:%M")
+                html_parts.append(
+                    f"<li><a href='{art['link']}' style='color:#4866a5; text-decoration:none;'><strong>{art['title']}</strong></a><br/>"
+                    f"来源：{art['source']} ｜ {time_str}</li>"
+                )
+            html_parts.append("</ul>")
+    
+    # 版权声明
+    html_parts.append("<hr/>")
+    html_parts.append("<p style='font-size:14px; color:#888;'>本文由AI自动生成，内容版权归原作者所有，仅做信息整理。</p>")
+    
+    return "\n".join(html_parts)
+
+def create_draft(access_token, title, html_content, thumb_media_id, digest="P大要闻"):
+    url = f"https://api.weixin.qq.com/cgi-bin/draft/add?access_token={access_token}"
+    data = {
+        "articles": [{
+            "title": title,
+            "content": html_content,
+            "thumb_media_id": thumb_media_id,
+            "author": "PUniversity",   # 建议用英文
+            "digest": digest,
+            "content_source_url": "",
+            "show_cover_pic": 1,
+            "need_open_comment": 0,
+            "only_fans_can_comment": 0
+        }]
+    }
+    # 关键：使用 json.dumps 并禁用 ASCII 转义，同时手动设置 headers
+    import json
+    resp = requests.post(url, data=json.dumps(data, ensure_ascii=False), headers={'Content-Type': 'application/json'})
+    resp_json = resp.json()
+    if "media_id" in resp_json:
+        print(f"✅ 草稿创建成功，media_id: {resp_json['media_id']}")
+        return resp_json["media_id"]
+    else:
+        print(f"❌ 创建草稿失败：{resp_json}")
+        return None
+
+def schedule_publish(access_token, media_id, publish_time):
+    """设置定时发布（需要 publish_time 是 Unix 时间戳）"""
+    url = f"https://api.weixin.qq.com/cgi-bin/freepublish/submit?access_token={access_token}"
+    data = {
+        "media_id": media_id,
+        "publish_time": publish_time
+    }
+    resp = requests.post(url, json=data).json()
+    if "publish_id" in resp:
+        print(f"✅ 已设置定时发布，publish_id: {resp['publish_id']}")
+        return True
+    else:
+        print(f"❌ 定时发布设置失败：{resp}")
+        return False
+
+def main():
+    # 1. 计算时间范围（前一天 20:00 到 当天 20:00，统一使用北京时间）
+    from datetime import datetime, timedelta, timezone
+
+    def get_beijing_time():
+        return datetime.now(timezone.utc).astimezone(timezone(timedelta(hours=8))).replace(tzinfo=None)
+
+    now_beijing = get_beijing_time()
+    today_20_beijing = now_beijing.replace(hour=20, minute=0, second=0, microsecond=0)
+    yesterday_20_beijing = today_20_beijing - timedelta(days=1)
+
+    # 判断运行时间，精准确定时间范围
+    if now_beijing < today_20_beijing:
+        # 如果在当天20:00之前运行，范围是【昨天20:00 -> 今天20:00】
+        start_time = yesterday_20_beijing
+        end_time = today_20_beijing
+    else:
+        # 如果在当天20:00之后运行，范围是【昨天20:00 -> 现在】
+        start_time = yesterday_20_beijing
+        end_time = now_beijing
+
+    date_str = now_beijing.strftime("%Y-%m-%d")
+    print(f"抓取时间范围 (北京时间): {start_time} 至 {end_time}")
+
+    # 2. 抓取文章
+    articles = fetch_articles_from_feeds(RSS_FEEDS_WITH_CATEGORY, start_time, end_time)
+    if not articles:
+        print("没有抓取到新文章，退出。")
+        return
+
+    # 3. 生成 Markdown 推文
+    html_content = generate_markdown_content(articles, date_str)
+    title = f"P大要闻｜{date_str}"
+
+    # 4. 获取微信 access_token
+    token = get_access_token(APP_ID, APP_SECRET)
+    if not token:
+        return
+
+    # 5. 上传封面
+    thumb_id = upload_cover(token, COVER_IMAGE_PATH)
+    if not thumb_id:
+        return
+
+    # 6. 创建草稿
+    media_id = create_draft(token, title, html_content, thumb_id, "P大要闻")
+    if not media_id:
+        return
+
+    # 7. 设置定时发布（优先当天 21:00，若已过则改为次日 8:00）
+    target = datetime.now().replace(hour=21, minute=0, second=0, microsecond=0)
+    if target <= datetime.now():
+        target = datetime.now().replace(hour=8, minute=0, second=0, microsecond=0) + timedelta(days=1)
+    publish_time = int(target.timestamp())
+    success = schedule_publish(token, media_id, publish_time)
+    if success:
+        print(f"今日北大资讯已自动保存草稿并设置定时发布（{datetime.fromtimestamp(publish_time)}）")
+    else:
+        print("今日北大资讯已保存草稿，但定时发布设置失败，请手动发布。")
+
+if __name__ == "__main__":
+    main()
